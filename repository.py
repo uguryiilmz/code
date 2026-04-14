@@ -10,6 +10,10 @@ class AbstractRepository(abc.ABC):
     @abc.abstractmethod
     def get(self, reference) -> model.Batch:
         raise NotImplementedError
+    
+    @abc.abstractmethod
+    def get_line_item(self, order_id: str, sku: str) -> model.OrderLine:
+        raise NotImplementedError
 
 
 class SqlAlchemyRepository(AbstractRepository):
@@ -24,3 +28,10 @@ class SqlAlchemyRepository(AbstractRepository):
 
     def list(self):
         return self.session.query(model.Batch).all()
+
+    def get_line_item(self, order_id: str, sku: str) -> model.OrderLine:
+        return (
+            self.session.query(model.OrderLine)
+            .filter_by(orderid=order_id, sku=sku)
+            .one()
+        )
