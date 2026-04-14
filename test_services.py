@@ -91,12 +91,7 @@ def test_deallocate_decrements_correct_quantity():
 
 
 def test_deallocate_needs_sku_when_one_order_has_several_line_items():
-    """Use case: order ORD-42 contains multiple products (same order id, different skus).
 
-    Allocation already ties each line to a batch by matching skus. Deallocation still
-    needs (orderid, sku) because the persistence layer stores one row per line item:
-    without sku, ``orderid`` alone is ambiguous and could pick the wrong line.
-    """
     repo, session = FakeRepository([]), FakeSession()
     services.add_batch("b-blue", "BLUE-PLINTH", 100, None, repo, session)
     services.add_batch("b-red", "RED-PLINTH", 100, None, repo, session)
@@ -119,5 +114,10 @@ def test_deallocate_needs_sku_when_one_order_has_several_line_items():
     assert batch_red.available_quantity == 93
 
 
-# def test_trying_to_deallocate_unallocated_batch():
-#     ...  #  TODO: should this error or pass silently? up to you.
+def test_trying_to_deallocate_unallocated_batch():
+    """Deallocate fails when order line is not allocated to any batch."""
+    repo, session = FakeRepository([]), FakeSession()
+    services.add_batch("b1", "BLUE-PLINTH", 100, None, repo, session)
+    line = model.OrderLine("o1", "BLUE-PLINTH", 10)
+    with pytest.raises(Exception, match="Couldnt find the order line"):
+        services.deallocate(line.orderid, line.sku, repo, session)
