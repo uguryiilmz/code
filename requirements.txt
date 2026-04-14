@@ -1,5 +1,5 @@
 pytest
-sqlalchemy
+sqlalchemy==1.4.49
 flask
 psycopg2-binary
 requests
