@@ -3,10 +3,13 @@ import threading
 import time
 import traceback
 from typing import List
+
 import pytest
+from sqlalchemy.orm.exc import StaleDataError
+
 from allocation.domain import model
 from allocation.service_layer import unit_of_work
-from ..random_refs import random_sku, random_batchref, random_orderid
+from ..random_refs import random_batchref, random_orderid, random_sku
 
 
 def insert_batch(session, ref, sku, qty, eta, product_version=1):
@@ -46,8 +49,40 @@ def test_uow_can_retrieve_a_batch_and_allocate_to_it(session_factory):
         product.allocate(line)
         uow.commit()
 
+    [[version_after]] = session.execute(
+        "SELECT version_number FROM products WHERE sku=:sku",
+        dict(sku="HIPSTER-WORKBENCH"),
+    )
+    assert version_after == 2
+
     batchref = get_allocated_batch_ref(session, "o1", "HIPSTER-WORKBENCH")
     assert batchref == "batch1"
+
+
+def test_commit_fails_with_stale_version_when_row_changed_elsewhere(session_factory):
+    sku = "OPTIMISTIC-SKU"
+    session = session_factory()
+    insert_batch(session, "batch1", sku, 100, None)
+    session.commit()
+
+    uow_a = unit_of_work.SqlAlchemyUnitOfWork(session_factory)
+    uow_b = unit_of_work.SqlAlchemyUnitOfWork(session_factory)
+    uow_a.__enter__()
+    uow_b.__enter__()
+    try:
+        product_a = uow_a.products.get(sku=sku)
+        product_b = uow_b.products.get(sku=sku)
+        assert product_a.version_number == product_b.version_number == 1
+
+        product_a.allocate(model.OrderLine("order-a", sku, 10))
+        uow_a.commit()
+
+        product_b.allocate(model.OrderLine("order-b", sku, 10))
+        with pytest.raises(StaleDataError):
+            uow_b.commit()
+    finally:
+        uow_b.__exit__(None, None, None)
+        uow_a.__exit__(None, None, None)
 
 
 def test_rolls_back_uncommitted_work_by_default(session_factory):
@@ -111,7 +146,7 @@ def test_concurrent_updates_to_version_are_not_allowed(postgres_session_factory)
     )
     assert version == 2
     [exception] = exceptions
-    assert "could not serialize access due to concurrent update" in str(exception)
+    assert isinstance(exception, StaleDataError)
 
     orders = session.execute(
         "SELECT orderid FROM allocations"
